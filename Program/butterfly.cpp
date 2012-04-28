@@ -328,15 +328,14 @@ int main(int argc, char **argv)
             BitFile fpga_bit;
 			fpga_bit.readFile(cBscan_sram_fn);
 
-            //printf("\nUploading \"%s\". ", cBscan_sram_fn);
-            //alg.array_program(fpga_bit);
+            printf("\nUploading \"%s\". ", cBscan_sram_fn);
+            alg.array_program(fpga_bit);
 
             BinaryFile sram_bin;
 
             ProgAlgSram alg1(jtag,io.operator*());
 
             sram_bin.readFile(cFpga_fn, false);
-            //flash_file.print();
             printf("\nProgramming SRAM with \"%s\".\n", cFpga_fn);
             result=alg1.ProgramSram(sram_bin, sram_options);
 
