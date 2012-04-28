@@ -43,8 +43,10 @@ Changes:
 #include "jtag.h"
 #include "devicedb.h"
 #include "progalgxc3s.h"
+#include "progalgsram.h"
 #include "progalgspi.h"
 #include "bitfile.h"
+#include "binaryfile.h"
 
 
 unsigned int get_id(Jtag &jtag, DeviceDB &db, int chainpos, bool verbose)
@@ -93,6 +95,9 @@ void usage(char *name)
       "   -b <bitfile>\tbscan_spi bit file (enables spi access via JTAG)\n"
       "   -s [e|v|p|a]\tSPI Flash options: e=Erase Only, v=Verify Only,\n"
       "               \tp=Program Only or a=ALL (Default)\n"
+      "   -B <bitfile>\tbscan_sram bit file (enables SRAM access via JTAG)\n"
+      "   -S [v|p|a]\tSRAM options: v=Verify Only,\n"
+      "               \tp=Program Only or a=ALL (Default)\n"
       "   -c\t\tDisplay current status of FPGA\n"
       "   -C\t\tDisplay STAT Register of FPGA\n"
       "   -r\t\tTrigger a reconfiguration of FPGA\n",name);
@@ -108,6 +113,7 @@ int main(int argc, char **argv)
     unsigned int id;
     bool       verbose    = false;
     bool     spiflash     = false;
+    bool     sram         = false;
     bool     reconfigure = false;
     bool     detectchain  = false;
     int     displaystatus = 0; // 0=no status, 1=JTAG IR data, 2=STAT Register readback
@@ -118,14 +124,16 @@ int main(int argc, char **argv)
     char *devicedb = NULL;
     char c;
     char *cFpga_fn=0;
-    char *cBscan_fn=0;
+    char *cBscan_spi_fn=0;
+    char *cBscan_sram_fn=0;
     ProgAlgSpi::Spi_Options_t spi_options=ProgAlgSpi::FULL;
+    ProgAlgSram::Sram_Options_t sram_options=ProgAlgSram::FULL;
     DeviceDB db(devicedb);
 
 	std::auto_ptr<IOBase>  io;
 
 
-    while ((c = getopt (argc, argv, "hb:f:s:jvcCr")) != -1)
+    while ((c = getopt (argc, argv, "hb:f:s:jvcCrB:S:")) != -1)
         switch (c)
         {
         case 'r':
@@ -148,8 +156,8 @@ int main(int argc, char **argv)
             strcpy(cFpga_fn,optarg);
             break;
         case 'b':
-            cBscan_fn=(char*)malloc(strlen(optarg)+1);
-            strcpy(cBscan_fn,optarg);
+            cBscan_spi_fn=(char*)malloc(strlen(optarg)+1);
+            strcpy(cBscan_spi_fn,optarg);
             break;
         case 's':
             switch(optarg[0])
@@ -175,6 +183,30 @@ int main(int argc, char **argv)
                     usage(argv[0]);
             }
             break;
+        case 'B':
+            cBscan_sram_fn=(char*)malloc(strlen(optarg)+1);
+            strcpy(cBscan_sram_fn,optarg);
+            break;
+        case 'S':
+            switch(optarg[0])
+            {
+                case 'p':
+                case 'P':
+                    sram_options=ProgAlgSram::WRITE_ONLY;
+                    break;
+                case 'v':
+                case 'V':
+                    sram_options=ProgAlgSram::VERIFY_ONLY;
+                    break;
+                case 'a':
+                case 'A':
+                    sram_options=ProgAlgSram::FULL;
+                    break;
+                default:
+                    printf("Unknown argument: \"%c\" to option: \"%c\"\n",c, optarg[0]);
+                    usage(argv[0]);
+            }
+            break;
         case '?':
             if (optopt == 'i')
                 fprintf (stderr, "Option -%c requires an argument.\n", optopt);
@@ -190,11 +222,21 @@ int main(int argc, char **argv)
             usage(argv[0]);
         }
 
-    if(cBscan_fn)
+    if(cBscan_spi_fn)
     {
         // Erase only does not need any main fpga bit file only bscan_spi
         spiflash=true;
         if(spi_options!=ProgAlgSpi::ERASE_ONLY&&!cFpga_fn)
+        {
+            printf("Please specify main bit file (-f <bitfile>)\n");
+            return 1;
+        }
+
+    }
+    else if(cBscan_sram_fn)
+    {
+        sram=true;
+        if(!cFpga_fn)
         {
             printf("Please specify main bit file (-f <bitfile>)\n");
             return 1;
@@ -254,10 +296,10 @@ int main(int argc, char **argv)
 		if(spiflash)
 		{
             BitFile fpga_bit;
-			fpga_bit.readFile(cBscan_fn);
+			fpga_bit.readFile(cBscan_spi_fn);
 			//fpga_bit.print();
 
-            printf("\nUploading \"%s\". ", cBscan_fn);
+            printf("\nUploading \"%s\". ", cBscan_spi_fn);
             alg.array_program(fpga_bit);
 
             BitFile flash_bit;
@@ -277,6 +319,26 @@ int main(int argc, char **argv)
                 printf("Erasing External Flash Memory.\n");
                 result=alg1.EraseSpi();
             }
+
+            if(!result)
+                printf("Error occured.\n");
+		}
+		else if(sram)
+		{
+            BitFile fpga_bit;
+			fpga_bit.readFile(cBscan_sram_fn);
+
+            //printf("\nUploading \"%s\". ", cBscan_sram_fn);
+            //alg.array_program(fpga_bit);
+
+            BinaryFile sram_bin;
+
+            ProgAlgSram alg1(jtag,io.operator*());
+
+            sram_bin.readFile(cFpga_fn, false);
+            //flash_file.print();
+            printf("\nProgramming SRAM with \"%s\".\n", cFpga_fn);
+            result=alg1.ProgramSram(sram_bin, sram_options);
 
             if(!result)
                 printf("Error occured.\n");
